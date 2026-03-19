@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head><title>Generate Icons</title></head>
+<body>
+<script>
+// Generate EZ Climber app icons at various sizes
+const sizes = [72, 96, 128, 144, 152, 192, 384, 512];
+
+function drawIcon(size) {
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const ctx = c.getContext('2d');
+
+  const dark = '#0f380f';
+  const light = '#9bbc0f';
+  const mid = '#306230';
+
+  // Background
+  ctx.fillStyle = dark;
+  ctx.fillRect(0, 0, size, size);
+
+  // Border
+  const b = Math.max(2, Math.floor(size * 0.04));
+  ctx.fillStyle = mid;
+  ctx.fillRect(b, b, size - b*2, size - b*2);
+  ctx.fillStyle = dark;
+  ctx.fillRect(b*2, b*2, size - b*4, size - b*4);
+
+  const px = size / 32; // pixel unit
+
+  // Draw ladder in center
+  ctx.fillStyle = light;
+  const lx = size * 0.4;
+  const lw = size * 0.2;
+  const lt = size * 0.15;
+  const lb = size * 0.85;
+  // Rails
+  ctx.fillRect(lx, lt, px * 1.5, lb - lt);
+  ctx.fillRect(lx + lw - px * 1.5, lt, px * 1.5, lb - lt);
+  // Rungs
+  const rungCount = 8;
+  for (let i = 0; i <= rungCount; i++) {
+    const ry = lt + (lb - lt) * i / rungCount;
+    ctx.fillRect(lx, ry, lw, px);
+  }
+
+  // Draw player on ladder
+  const playerSize = size * 0.12;
+  const playerX = size * 0.5 - playerSize * 0.5;
+  const playerY = size * 0.35;
+  // Head
+  ctx.fillRect(playerX + playerSize * 0.2, playerY, playerSize * 0.6, playerSize * 0.35);
+  // Body
+  ctx.fillRect(playerX, playerY + playerSize * 0.4, playerSize, playerSize * 0.3);
+  // Legs
+  ctx.fillRect(playerX + playerSize * 0.15, playerY + playerSize * 0.75, playerSize * 0.25, playerSize * 0.25);
+  ctx.fillRect(playerX + playerSize * 0.6, playerY + playerSize * 0.75, playerSize * 0.25, playerSize * 0.25);
+
+  // Draw cannon left
+  const csize = size * 0.08;
+  ctx.fillRect(size * 0.08, size * 0.55, csize * 1.5, csize);
+  // Barrel
+  ctx.fillRect(size * 0.08 + csize * 1.5, size * 0.55 + csize * 0.25, csize, csize * 0.5);
+
+  // Draw cannon right
+  ctx.fillRect(size * 0.78, size * 0.65, csize * 1.5, csize);
+  // Barrel
+  ctx.fillRect(size * 0.78 - csize, size * 0.65 + csize * 0.25, csize, csize * 0.5);
+
+  // "EZ" text at bottom
+  const fontSize = Math.max(10, Math.floor(size * 0.14));
+  ctx.font = `bold ${fontSize}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.fillText('EZ', size * 0.5, size * 0.82);
+
+  return c;
+}
+
+// Generate and create download links
+sizes.forEach(size => {
+  const canvas = drawIcon(size);
+  const link = document.createElement('a');
+  link.download = `icon-${size}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.textContent = `Download ${size}x${size}`;
+  link.style.display = 'block';
+  link.style.margin = '8px';
+  link.style.color = '#9bbc0f';
+  document.body.appendChild(link);
+  document.body.appendChild(canvas);
+  canvas.style.margin = '8px';
+  canvas.style.border = '1px solid #333';
+});
+
+document.body.style.background = '#222';
+document.body.style.fontFamily = 'monospace';
+document.body.style.padding = '20px';
+</script>
+</body>
+</html>

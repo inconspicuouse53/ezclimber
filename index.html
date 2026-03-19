@@ -819,11 +819,27 @@ function drawNameEntry() {
     }
   }
 
-  // Instructions
-  drawText('ARROWS:SEL', 30, 102);
-  drawText('ENTER:PICK', 30, 110);
-  drawText('BACK:DEL', 38, 118);
-  drawText('ESC:DONE', 38, 126);
+  // Touch-friendly buttons at bottom
+  const btnY = 100;
+  const btnH = 9;
+  const btnPad = 2;
+
+  // DEL button - left side
+  const delX = 16;
+  const delW = 'DEL'.length * 4 + btnPad * 2;
+  fillRect(delX, btnY, delW, btnH);
+  drawText('DEL', delX + btnPad, btnY + btnPad, false);
+
+  // DONE button - right side
+  const doneText = 'DONE';
+  const doneW = doneText.length * 4 + btnPad * 2;
+  const doneX = NATIVE_W - doneW - 16;
+  fillRect(doneX, btnY, doneW, btnH);
+  drawText(doneText, doneX + btnPad, btnY + btnPad, false);
+
+  // Tap a letter hint
+  drawText('TAP LETTER', centerX('TAP LETTER'), 114);
+  drawText('OR USE BUTTONS', centerX('OR USE BUTTONS'), 122);
 }
 
 function drawLeaderboard() {
@@ -982,6 +998,68 @@ document.addEventListener('keyup', (e) => {
   }
 });
 
+// Convert screen tap to native game coordinates
+function screenToNative(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const x = (clientX - rect.left) / rect.width * NATIVE_W;
+  const y = (clientY - rect.top) / rect.height * NATIVE_H;
+  return { x, y };
+}
+
+function handleNameEntryTap(clientX, clientY) {
+  const pos = screenToNative(clientX, clientY);
+  const nx = pos.x;
+  const ny = pos.y;
+
+  // Check character grid tap
+  const selY = 62;
+  const charsPerRow = 13;
+  const totalRows = Math.ceil(NAME_CHARS.length / charsPerRow);
+
+  for (let i = 0; i < NAME_CHARS.length; i++) {
+    const row = Math.floor(i / charsPerRow);
+    const col = i % charsPerRow;
+    const cx = 10 + col * 11;
+    const cy = selY + row * 10;
+
+    if (nx >= cx - 2 && nx <= cx + 5 && ny >= cy - 2 && ny <= cy + 8) {
+      // Tapped this character — add it
+      nameEntryCursor = i;
+      if (nameEntryName.length < NAME_MAX_LEN) {
+        nameEntryName += NAME_CHARS[i];
+        playTone(600, 0.04, 'square', 0.08);
+      }
+      return;
+    }
+  }
+
+  // Check DEL button
+  const btnY = 100;
+  const btnH = 9;
+  const btnPad = 2;
+  const delX = 16;
+  const delW = 'DEL'.length * 4 + btnPad * 2;
+  if (nx >= delX && nx <= delX + delW && ny >= btnY && ny <= btnY + btnH) {
+    if (nameEntryName.length > 0) {
+      nameEntryName = nameEntryName.slice(0, -1);
+      playTone(200, 0.04, 'square', 0.06);
+    }
+    return;
+  }
+
+  // Check DONE button
+  const doneText = 'DONE';
+  const doneW = doneText.length * 4 + btnPad * 2;
+  const doneX = NATIVE_W - doneW - 16;
+  if (nx >= doneX && nx <= doneX + doneW && ny >= btnY && ny <= btnY + btnH) {
+    addScore(nameEntryName, nameEntryLevel);
+    playTone(880, 0.1, 'square', 0.1);
+    state = 'leaderboard';
+    titleBlink = 0;
+    return;
+  }
+}
+
 // Touch / Click controls (left half = down, right half = up)
 canvas.addEventListener('mousedown', (e) => {
   ensureAudio();
@@ -995,7 +1073,13 @@ canvas.addEventListener('mousedown', (e) => {
     startLevel();
     return;
   }
-  if (state === 'leaderboard' || state === 'nameEntry') {
+  if (state === 'nameEntry') {
+    handleNameEntryTap(e.clientX, e.clientY);
+    return;
+  }
+  if (state === 'leaderboard') {
+    state = 'title';
+    titleBlink = 0;
     return;
   }
 
@@ -1030,7 +1114,13 @@ canvas.addEventListener('touchstart', (e) => {
     startLevel();
     return;
   }
-  if (state === 'leaderboard' || state === 'nameEntry') {
+  if (state === 'nameEntry') {
+    handleNameEntryTap(touch.clientX, touch.clientY);
+    return;
+  }
+  if (state === 'leaderboard') {
+    state = 'title';
+    titleBlink = 0;
     return;
   }
 
