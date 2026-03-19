@@ -1,0 +1,1065 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>EZ Climber</title>
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f380f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="EZ Climber">
+<link rel="apple-touch-icon" href="icons/icon-152.png">
+<link rel="apple-touch-icon" sizes="72x72" href="icons/icon-72.png">
+<link rel="apple-touch-icon" sizes="96x96" href="icons/icon-96.png">
+<link rel="apple-touch-icon" sizes="128x128" href="icons/icon-128.png">
+<link rel="apple-touch-icon" sizes="144x144" href="icons/icon-144.png">
+<link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
+<link rel="apple-touch-icon" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="384x384" href="icons/icon-384.png">
+<link rel="apple-touch-icon" sizes="512x512" href="icons/icon-512.png">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: #0f380f;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: monospace;
+    touch-action: none;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  #gameWrapper {
+    position: relative;
+    border: 8px solid #306230;
+    border-radius: 12px;
+    box-shadow: 0 0 40px rgba(155,188,15,0.3);
+  }
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    cursor: none;
+  }
+  #controls {
+    color: #9bbc0f;
+    text-align: center;
+    margin-top: 12px;
+    font-size: 14px;
+    font-family: monospace;
+    letter-spacing: 1px;
+  }
+
+  /* Mobile: canvas fills entire screen, no border/controls */
+  @media (max-width: 700px), (pointer: coarse) {
+    body { display: block; }
+    #gameWrapper {
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+    }
+    canvas {
+      width: 100vw !important;
+      height: 100vh !important;
+      height: 100dvh !important;
+    }
+    #controls { display: none; }
+  }
+</style>
+</head>
+<body>
+<div>
+  <div id="gameWrapper">
+    <canvas id="game"></canvas>
+  </div>
+  <div id="controls">ARROW UP / RIGHT CLICK = CLIMB &nbsp; | &nbsp; ARROW DOWN / LEFT CLICK = DESCEND</div>
+</div>
+<script>
+// ============================================================
+// EZ CLIMBER - Game Boy Style Retro Climbing Game
+// ============================================================
+
+// --- CONSTANTS ---
+const NATIVE_W = 160;
+const NATIVE_H = 144;
+const SCALE = 4;
+const CANVAS_W = NATIVE_W * SCALE;
+const CANVAS_H = NATIVE_H * SCALE;
+
+const COL_LIGHT = '#9bbc0f';
+const COL_DARK  = '#0f380f';
+
+const LADDER_X = 72;
+const LADDER_W = 16;
+const LADDER_TOP = 16;
+const LADDER_BOTTOM = 136;
+const RUNG_SPACING = 8;
+
+const PLAYER_W = 8;
+const PLAYER_H = 8;
+
+const CANNON_W = 10;
+const CANNON_H = 8;
+
+const BULLET_W = 4;
+const BULLET_H = 2;
+
+const CLIMB_SPEED = 1.2;
+const GOAL_Y = LADDER_TOP + 4;
+
+// --- CANVAS SETUP ---
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+canvas.width = CANVAS_W;
+canvas.height = CANVAS_H;
+
+// --- AUDIO ENGINE (Web Audio API) ---
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx = null;
+
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new AudioCtx();
+}
+
+function playTone(freq, duration, type='square', vol=0.15) {
+  ensureAudio();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+function sfxClimb() {
+  playTone(440 + Math.random()*200, 0.05, 'square', 0.08);
+}
+
+function sfxDeath() {
+  playTone(300, 0.1, 'square', 0.2);
+  setTimeout(() => playTone(200, 0.15, 'square', 0.2), 100);
+  setTimeout(() => playTone(100, 0.3, 'sawtooth', 0.2), 250);
+}
+
+function sfxLevelUp() {
+  playTone(523, 0.1, 'square', 0.15);
+  setTimeout(() => playTone(659, 0.1, 'square', 0.15), 100);
+  setTimeout(() => playTone(784, 0.1, 'square', 0.15), 200);
+  setTimeout(() => playTone(1047, 0.2, 'square', 0.15), 300);
+}
+
+function sfxShoot() {
+  playTone(150 + Math.random()*50, 0.06, 'sawtooth', 0.06);
+}
+
+function sfxStart() {
+  playTone(262, 0.12, 'square', 0.12);
+  setTimeout(() => playTone(330, 0.12, 'square', 0.12), 120);
+  setTimeout(() => playTone(392, 0.15, 'square', 0.12), 240);
+}
+
+// --- GAME STATE ---
+let state = 'title'; // title, playing, dead, levelComplete, win, nameEntry, leaderboard
+let level = 1;
+let playerY = LADDER_BOTTOM - PLAYER_H;
+let cannons = [];
+let bullets = [];
+let moveUp = false;
+let moveDown = false;
+let climbTimer = 0;
+let deadTimer = 0;
+let levelCompleteTimer = 0;
+let flashTimer = 0;
+let titleBlink = 0;
+let highestLevel = 1;
+
+// --- LEADERBOARD ---
+const MAX_LEADERBOARD = 10;
+let leaderboard = [];
+let nameEntryName = '';
+let nameEntryCursor = 0;
+let nameEntryLevel = 1;
+let nameEntryBlink = 0;
+const NAME_MAX_LEN = 8;
+const NAME_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ';
+
+function loadLeaderboard() {
+  try {
+    const data = localStorage.getItem('ezclimber_leaderboard');
+    if (data) leaderboard = JSON.parse(data);
+  } catch(e) { leaderboard = []; }
+}
+
+function saveLeaderboard() {
+  try {
+    localStorage.setItem('ezclimber_leaderboard', JSON.stringify(leaderboard));
+  } catch(e) {}
+}
+
+function addScore(name, lvl) {
+  const trimmed = name.trim() || 'AAA';
+  leaderboard.push({ name: trimmed, level: lvl, date: Date.now() });
+  leaderboard.sort((a, b) => b.level - a.level || a.date - b.date);
+  if (leaderboard.length > MAX_LEADERBOARD) leaderboard.length = MAX_LEADERBOARD;
+  saveLeaderboard();
+}
+
+function qualifiesForBoard(lvl) {
+  if (leaderboard.length < MAX_LEADERBOARD) return true;
+  return lvl > leaderboard[leaderboard.length - 1].level;
+}
+
+loadLeaderboard();
+
+// --- PIXEL DRAWING HELPERS ---
+function setPixel(x, y, dark=true) {
+  ctx.fillStyle = dark ? COL_DARK : COL_LIGHT;
+  ctx.fillRect(x * SCALE, y * SCALE, SCALE, SCALE);
+}
+
+function fillRect(x, y, w, h, dark=true) {
+  ctx.fillStyle = dark ? COL_DARK : COL_LIGHT;
+  ctx.fillRect(x * SCALE, y * SCALE, w * SCALE, h * SCALE);
+}
+
+function clearScreen() {
+  ctx.fillStyle = COL_LIGHT;
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+}
+
+// --- PIXEL FONT (3x5) ---
+const FONT = {
+  'A': [0b111,0b101,0b111,0b101,0b101],
+  'B': [0b110,0b101,0b110,0b101,0b110],
+  'C': [0b111,0b100,0b100,0b100,0b111],
+  'D': [0b110,0b101,0b101,0b101,0b110],
+  'E': [0b111,0b100,0b110,0b100,0b111],
+  'F': [0b111,0b100,0b110,0b100,0b100],
+  'G': [0b111,0b100,0b101,0b101,0b111],
+  'H': [0b101,0b101,0b111,0b101,0b101],
+  'I': [0b111,0b010,0b010,0b010,0b111],
+  'J': [0b111,0b001,0b001,0b101,0b111],
+  'K': [0b101,0b101,0b110,0b101,0b101],
+  'L': [0b100,0b100,0b100,0b100,0b111],
+  'M': [0b101,0b111,0b111,0b101,0b101],
+  'N': [0b101,0b111,0b111,0b111,0b101],
+  'O': [0b111,0b101,0b101,0b101,0b111],
+  'P': [0b111,0b101,0b111,0b100,0b100],
+  'Q': [0b111,0b101,0b101,0b111,0b001],
+  'R': [0b111,0b101,0b110,0b101,0b101],
+  'S': [0b111,0b100,0b111,0b001,0b111],
+  'T': [0b111,0b010,0b010,0b010,0b010],
+  'U': [0b101,0b101,0b101,0b101,0b111],
+  'V': [0b101,0b101,0b101,0b101,0b010],
+  'W': [0b101,0b101,0b111,0b111,0b101],
+  'X': [0b101,0b101,0b010,0b101,0b101],
+  'Y': [0b101,0b101,0b010,0b010,0b010],
+  'Z': [0b111,0b001,0b010,0b100,0b111],
+  '0': [0b111,0b101,0b101,0b101,0b111],
+  '1': [0b010,0b110,0b010,0b010,0b111],
+  '2': [0b111,0b001,0b111,0b100,0b111],
+  '3': [0b111,0b001,0b111,0b001,0b111],
+  '4': [0b101,0b101,0b111,0b001,0b001],
+  '5': [0b111,0b100,0b111,0b001,0b111],
+  '6': [0b111,0b100,0b111,0b101,0b111],
+  '7': [0b111,0b001,0b001,0b001,0b001],
+  '8': [0b111,0b101,0b111,0b101,0b111],
+  '9': [0b111,0b101,0b111,0b001,0b111],
+  ' ': [0b000,0b000,0b000,0b000,0b000],
+  '-': [0b000,0b000,0b111,0b000,0b000],
+  '!': [0b010,0b010,0b010,0b000,0b010],
+  ':': [0b000,0b010,0b000,0b010,0b000],
+  '.': [0b000,0b000,0b000,0b000,0b010],
+};
+
+function drawText(text, x, y, dark=true) {
+  const str = text.toUpperCase();
+  let cx = x;
+  for (let i = 0; i < str.length; i++) {
+    const glyph = FONT[str[i]];
+    if (glyph) {
+      for (let row = 0; row < 5; row++) {
+        for (let col = 0; col < 3; col++) {
+          if (glyph[row] & (1 << (2 - col))) {
+            setPixel(cx + col, y + row, dark);
+          }
+        }
+      }
+    }
+    cx += 4;
+  }
+}
+
+// Center X for a string of given length
+function centerX(text) {
+  return Math.floor((NATIVE_W - text.length * 4) / 2);
+}
+
+// Draw text with a solid background box behind it (padding in px)
+function drawTextBox(text, x, y, pad=2) {
+  const tw = text.length * 4;
+  const th = 5;
+  // Draw light background box
+  fillRect(x - pad, y - pad, tw + pad * 2, th + pad * 2, false);
+  // Draw dark border
+  fillRect(x - pad, y - pad, tw + pad * 2, 1, true);
+  fillRect(x - pad, y + th + pad - 1, tw + pad * 2, 1, true);
+  fillRect(x - pad, y - pad, 1, th + pad * 2, true);
+  fillRect(x - pad + tw + pad * 2 - 1, y - pad, 1, th + pad * 2, true);
+  // Draw text
+  drawText(text, x, y, true);
+}
+
+// Draw centered text with background box
+function drawCenteredBox(text, y, pad=2) {
+  drawTextBox(text, centerX(text), y, pad);
+}
+
+// Draw text at 2x scale (each font pixel = 2x2 game pixels)
+function drawBigText(text, x, y, dark=true) {
+  const str = text.toUpperCase();
+  let cx = x;
+  for (let i = 0; i < str.length; i++) {
+    const glyph = FONT[str[i]];
+    if (glyph) {
+      for (let row = 0; row < 5; row++) {
+        for (let col = 0; col < 3; col++) {
+          if (glyph[row] & (1 << (2 - col))) {
+            fillRect(cx + col * 2, y + row * 2, 2, 2, dark);
+          }
+        }
+      }
+    }
+    cx += 8; // 3*2 + 2 gap
+  }
+}
+
+// Width of big text in pixels
+function bigTextWidth(text) {
+  return text.length * 8;
+}
+
+// Center X for big text
+function centerBigX(text) {
+  return Math.floor((NATIVE_W - bigTextWidth(text)) / 2);
+}
+
+// Draw big text with background box
+function drawBigTextBox(text, x, y, pad=3) {
+  const tw = bigTextWidth(text);
+  const th = 10; // 5 rows * 2
+  fillRect(x - pad, y - pad, tw + pad * 2, th + pad * 2, false);
+  fillRect(x - pad, y - pad, tw + pad * 2, 1, true);
+  fillRect(x - pad, y + th + pad - 1, tw + pad * 2, 1, true);
+  fillRect(x - pad, y - pad, 1, th + pad * 2, true);
+  fillRect(x - pad + tw + pad * 2 - 1, y - pad, 1, th + pad * 2, true);
+  drawBigText(text, x, y, true);
+}
+
+function drawCenteredBigBox(text, y, pad=3) {
+  drawBigTextBox(text, centerBigX(text), y, pad);
+}
+
+// --- SPRITE DRAWING ---
+const PLAYER_SPRITE = [
+  [0,0,1,1,1,1,0,0],
+  [0,0,1,0,0,1,0,0],
+  [0,0,1,1,1,1,0,0],
+  [0,1,1,1,1,1,1,0],
+  [0,0,0,1,1,0,0,0],
+  [0,0,1,1,1,1,0,0],
+  [0,0,1,0,0,1,0,0],
+  [0,1,1,0,0,1,1,0],
+];
+
+const PLAYER_CLIMB1 = [
+  [0,0,1,1,1,1,0,0],
+  [0,0,1,0,0,1,0,0],
+  [0,0,1,1,1,1,0,0],
+  [1,1,1,1,1,0,0,0],
+  [0,0,0,1,1,0,0,0],
+  [0,0,1,1,1,1,0,0],
+  [0,0,1,0,0,1,0,0],
+  [0,0,1,0,0,1,1,0],
+];
+
+const PLAYER_CLIMB2 = [
+  [0,0,1,1,1,1,0,0],
+  [0,0,1,0,0,1,0,0],
+  [0,0,1,1,1,1,0,0],
+  [0,0,0,1,1,1,1,1],
+  [0,0,0,1,1,0,0,0],
+  [0,0,1,1,1,1,0,0],
+  [0,0,1,0,0,1,0,0],
+  [0,1,1,0,0,1,0,0],
+];
+
+const CANNON_LEFT_SPRITE = [
+  [0,0,1,1,1,1,1,0,0,0],
+  [0,1,1,1,1,1,1,0,0,0],
+  [1,1,1,1,1,1,1,1,1,1],
+  [1,1,0,0,1,1,1,1,1,1],
+  [1,1,0,0,1,1,1,1,1,1],
+  [1,1,1,1,1,1,1,1,1,1],
+  [0,1,1,1,1,1,1,0,0,0],
+  [0,0,1,1,1,1,1,0,0,0],
+];
+
+const CANNON_RIGHT_SPRITE = [
+  [0,0,0,1,1,1,1,1,0,0],
+  [0,0,0,1,1,1,1,1,1,0],
+  [1,1,1,1,1,1,1,1,1,1],
+  [1,1,1,1,1,1,0,0,1,1],
+  [1,1,1,1,1,1,0,0,1,1],
+  [1,1,1,1,1,1,1,1,1,1],
+  [0,0,0,1,1,1,1,1,1,0],
+  [0,0,0,1,1,1,1,1,0,0],
+];
+
+const SKULL_SPRITE = [
+  [0,0,1,1,1,1,0,0],
+  [0,1,1,1,1,1,1,0],
+  [1,1,0,1,1,0,1,1],
+  [1,1,0,1,1,0,1,1],
+  [0,1,1,0,0,1,1,0],
+  [0,0,1,0,0,1,0,0],
+  [0,0,1,1,1,1,0,0],
+  [0,0,0,1,1,0,0,0],
+];
+
+function drawSprite(sprite, x, y, dark=true) {
+  for (let row = 0; row < sprite.length; row++) {
+    for (let col = 0; col < sprite[row].length; col++) {
+      if (sprite[row][col]) {
+        setPixel(Math.floor(x) + col, Math.floor(y) + row, dark);
+      }
+    }
+  }
+}
+
+// --- LEVEL CONFIG ---
+function getLevelConfig(lvl) {
+  let leftCannons = 0;
+  let rightCannons = 0;
+  let cannonSpeed = 0.3;   // vertical movement speed
+  let bulletSpeed = 1.0;
+  let fireRate = 180;       // frames between shots (lower = faster)
+
+  // Cannon count thresholds (shifted 10 levels earlier for harder ramp)
+  if (lvl >= 2)  leftCannons = 1;
+  if (lvl >= 5)  rightCannons = 1;
+  if (lvl >= 10) { leftCannons = 2; rightCannons = 2; }
+  if (lvl >= 20) { leftCannons = 3; rightCannons = 3; }
+  if (lvl >= 30) { leftCannons = 4; rightCannons = 4; }
+  if (lvl >= 40) { leftCannons = 5; rightCannons = 5; }
+  if (lvl >= 50) { leftCannons = 6; rightCannons = 6; }
+  if (lvl >= 60) { leftCannons = 7; rightCannons = 7; }
+  if (lvl >= 75) { leftCannons = 7; rightCannons = 7; }
+
+  // Speed scaling - steeper ramp with tighter tiers
+  const tierBase = [0, 2, 5, 10, 20, 30, 40, 50, 60, 75, 90];
+  let tier = 0;
+  for (let t = tierBase.length - 1; t >= 0; t--) {
+    if (lvl >= tierBase[t]) { tier = t; break; }
+  }
+  const inTier = lvl - tierBase[tier];
+
+  cannonSpeed = 0.3 + tier * 0.1 + inTier * 0.025;
+  bulletSpeed = 0.8 + tier * 0.15 + inTier * 0.03;
+  fireRate = Math.max(22, 140 - tier * 12 - inTier * 3);
+
+  return { leftCannons, rightCannons, cannonSpeed, bulletSpeed, fireRate };
+}
+
+// --- CANNON MANAGEMENT ---
+function spawnCannons() {
+  cannons = [];
+  bullets = [];
+  const cfg = getLevelConfig(level);
+
+  const totalSlots = Math.max(cfg.leftCannons, cfg.rightCannons);
+  const usableH = LADDER_BOTTOM - LADDER_TOP - 20;
+
+  for (let i = 0; i < cfg.leftCannons; i++) {
+    const slotH = usableH / Math.max(cfg.leftCannons, 1);
+    const minY = LADDER_TOP + 10 + i * slotH;
+    const maxY = minY + slotH - CANNON_H;
+    cannons.push({
+      side: 'left',
+      x: 0,
+      y: minY + Math.random() * (maxY - minY),
+      minY: minY,
+      maxY: maxY,
+      dir: Math.random() > 0.5 ? 1 : -1,
+      speed: cfg.cannonSpeed * (0.8 + Math.random() * 0.4),
+      fireTimer: Math.floor(Math.random() * cfg.fireRate),
+      fireRate: cfg.fireRate,
+      bulletSpeed: cfg.bulletSpeed,
+    });
+  }
+
+  for (let i = 0; i < cfg.rightCannons; i++) {
+    const slotH = usableH / Math.max(cfg.rightCannons, 1);
+    const minY = LADDER_TOP + 10 + i * slotH;
+    const maxY = minY + slotH - CANNON_H;
+    cannons.push({
+      side: 'right',
+      x: NATIVE_W - CANNON_W,
+      y: minY + Math.random() * (maxY - minY),
+      minY: minY,
+      maxY: maxY,
+      dir: Math.random() > 0.5 ? 1 : -1,
+      speed: cfg.cannonSpeed * (0.8 + Math.random() * 0.4),
+      fireTimer: Math.floor(Math.random() * cfg.fireRate),
+      fireRate: cfg.fireRate,
+      bulletSpeed: cfg.bulletSpeed,
+    });
+  }
+}
+
+// --- GAME LOGIC ---
+function startLevel() {
+  playerY = LADDER_BOTTOM - PLAYER_H;
+  spawnCannons();
+  state = 'playing';
+  flashTimer = 0;
+}
+
+function resetGame() {
+  level = 1;
+  startLevel();
+}
+
+function updatePlaying() {
+  // Player movement
+  if (moveUp) {
+    playerY -= CLIMB_SPEED;
+    climbTimer++;
+    if (climbTimer % 8 === 0) sfxClimb();
+  } else if (moveDown) {
+    playerY += CLIMB_SPEED;
+    climbTimer++;
+    if (climbTimer % 8 === 0) sfxClimb();
+  } else {
+    climbTimer = 0;
+  }
+
+  // Clamp player
+  playerY = Math.max(LADDER_TOP, Math.min(LADDER_BOTTOM - PLAYER_H, playerY));
+
+  // Check win condition
+  if (playerY <= GOAL_Y) {
+    state = 'levelComplete';
+    levelCompleteTimer = 0;
+    sfxLevelUp();
+    return;
+  }
+
+  // Update cannons
+  for (const c of cannons) {
+    c.y += c.dir * c.speed;
+    if (c.y <= c.minY) { c.y = c.minY; c.dir = 1; }
+    if (c.y >= c.maxY) { c.y = c.maxY; c.dir = -1; }
+
+    c.fireTimer--;
+    if (c.fireTimer <= 0) {
+      c.fireTimer = c.fireRate + Math.floor(Math.random() * 30);
+      // Fire bullet
+      const bx = c.side === 'left' ? c.x + CANNON_W : c.x - BULLET_W;
+      const by = c.y + CANNON_H / 2 - BULLET_H / 2;
+      const bdir = c.side === 'left' ? 1 : -1;
+      bullets.push({ x: bx, y: by, dx: bdir * c.bulletSpeed });
+      sfxShoot();
+    }
+  }
+
+  // Update bullets
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    bullets[i].x += bullets[i].dx;
+    if (bullets[i].x < -BULLET_W || bullets[i].x > NATIVE_W + BULLET_W) {
+      bullets.splice(i, 1);
+      continue;
+    }
+
+    // Collision with player
+    const b = bullets[i];
+    const px = LADDER_X + LADDER_W / 2 - PLAYER_W / 2;
+    const py = playerY;
+    if (b && b.x + BULLET_W > px && b.x < px + PLAYER_W &&
+        b.y + BULLET_H > py && b.y < py + PLAYER_H) {
+      state = 'dead';
+      deadTimer = 0;
+      sfxDeath();
+      return;
+    }
+  }
+}
+
+function updateDead() {
+  deadTimer++;
+  if (deadTimer > 120) {
+    // Check if the run qualifies for leaderboard
+    if (level > 1 && qualifiesForBoard(level)) {
+      nameEntryLevel = level;
+      nameEntryName = '';
+      nameEntryCursor = 0;
+      state = 'nameEntry';
+    } else {
+      resetGame();
+    }
+  }
+}
+
+function updateLevelComplete() {
+  levelCompleteTimer++;
+  flashTimer++;
+  if (levelCompleteTimer > 90) {
+    if (level >= 100) {
+      state = 'win';
+    } else {
+      level++;
+      if (level > highestLevel) highestLevel = level;
+      startLevel();
+    }
+  }
+}
+
+// --- RENDERING ---
+function drawLadder() {
+  // Side rails
+  fillRect(LADDER_X, LADDER_TOP, 2, LADDER_BOTTOM - LADDER_TOP);
+  fillRect(LADDER_X + LADDER_W - 2, LADDER_TOP, 2, LADDER_BOTTOM - LADDER_TOP);
+
+  // Rungs
+  for (let y = LADDER_TOP; y <= LADDER_BOTTOM; y += RUNG_SPACING) {
+    fillRect(LADDER_X, y, LADDER_W, 1);
+  }
+}
+
+function drawGoal() {
+  // Draw goal marker at top - glowing arrow/flag
+  const blink = Math.floor(Date.now() / 300) % 2;
+  if (blink) {
+    fillRect(LADDER_X + 3, LADDER_TOP - 2, 10, 1);
+    fillRect(LADDER_X + 5, LADDER_TOP - 3, 6, 1);
+    fillRect(LADDER_X + 7, LADDER_TOP - 4, 2, 1);
+  }
+}
+
+function drawPlayer() {
+  const px = LADDER_X + LADDER_W / 2 - PLAYER_W / 2;
+  const py = Math.floor(playerY);
+  let sprite;
+  if (moveUp || moveDown) {
+    sprite = (Math.floor(climbTimer / 6) % 2 === 0) ? PLAYER_CLIMB1 : PLAYER_CLIMB2;
+  } else {
+    sprite = PLAYER_SPRITE;
+  }
+  drawSprite(sprite, px, py);
+}
+
+function drawCannons() {
+  for (const c of cannons) {
+    const sprite = c.side === 'left' ? CANNON_LEFT_SPRITE : CANNON_RIGHT_SPRITE;
+    drawSprite(sprite, Math.floor(c.x), Math.floor(c.y));
+  }
+}
+
+function drawBullets() {
+  for (const b of bullets) {
+    fillRect(Math.floor(b.x), Math.floor(b.y), BULLET_W, BULLET_H);
+  }
+}
+
+function drawHUD() {
+  // Level in top right with background box (matching CLEAR style)
+  const lvlStr = 'LEVEL ' + String(level);
+  drawTextBox(lvlStr, NATIVE_W - lvlStr.length * 4 - 4, 4, 2);
+}
+
+function drawTitle() {
+  clearScreen();
+  drawLadder();
+
+  // Title - large font
+  drawCenteredBigBox('EZ CLIMBER', 10, 3);
+
+  // Rules box
+  const rulesY = 30;
+  const rulesW = 140;
+  const rulesX = Math.floor((NATIVE_W - rulesW) / 2);
+  // Background for rules
+  fillRect(rulesX, rulesY, rulesW, 52, false);
+  // Border
+  fillRect(rulesX, rulesY, rulesW, 1, true);
+  fillRect(rulesX, rulesY + 51, rulesW, 1, true);
+  fillRect(rulesX, rulesY, 1, 52, true);
+  fillRect(rulesX + rulesW - 1, rulesY, 1, 52, true);
+
+  drawText('RULES:', centerX('RULES:'), rulesY + 3);
+  drawText('CLIMB TO THE TOP', centerX('CLIMB TO THE TOP'), rulesY + 11);
+  drawText('ONE HIT AND YOU', centerX('ONE HIT AND YOU'), rulesY + 19);
+  drawText('GO BACK TO LV 1!', centerX('GO BACK TO LV 1!'), rulesY + 27);
+  drawText('UP:CLIMB DOWN:DESC', centerX('UP:CLIMB DOWN:DESC'), rulesY + 37);
+  drawText('L:LEADERBOARD', centerX('L:LEADERBOARD'), rulesY + 45);
+
+  // Blinking start text
+  titleBlink++;
+  if (Math.floor(titleBlink / 30) % 2 === 0) {
+    drawCenteredBox('PRESS ENTER', 90, 2);
+  }
+
+  // Draw decorative cannons
+  drawSprite(CANNON_LEFT_SPRITE, 4, rulesY + 18);
+  drawSprite(CANNON_RIGHT_SPRITE, NATIVE_W - 14, rulesY + 18);
+}
+
+function drawDeathScreen() {
+  clearScreen();
+
+  // Draw skull
+  drawSprite(SKULL_SPRITE, NATIVE_W / 2 - 4, 40);
+
+  drawCenteredBox('HIT!', 55, 2);
+
+  if (deadTimer > 40) {
+    drawCenteredBox('BACK TO LV1', 75, 2);
+  }
+
+  // Flicker effect
+  if (deadTimer < 20 && deadTimer % 4 < 2) {
+    fillRect(0, 0, NATIVE_W, NATIVE_H);
+  }
+}
+
+function drawLevelCompleteScreen() {
+  clearScreen();
+  drawLadder();
+  drawPlayer();
+  drawCannons();
+  drawHUD();
+
+  // Flash effect - top left with background box
+  if (Math.floor(flashTimer / 4) % 2 === 0) {
+    drawTextBox('CLEAR!', 4, 4, 2);
+  }
+}
+
+function drawWinScreen() {
+  clearScreen();
+
+  drawCenteredBox('YOU WIN!', 30, 3);
+  drawCenteredBox('ALL 100 LEVELS', 48, 2);
+  drawCenteredBox('CLEARED!', 60, 2);
+
+  // Draw happy player
+  drawSprite(PLAYER_SPRITE, NATIVE_W / 2 - 4, 75);
+
+  titleBlink++;
+  if (Math.floor(titleBlink / 30) % 2 === 0) {
+    drawCenteredBox('PRESS ENTER', 95, 2);
+  }
+}
+
+function drawNameEntry() {
+  clearScreen();
+
+  drawText('HIGH SCORE!', 34, 8);
+  drawText('REACHED LV' + nameEntryLevel, 24, 18);
+
+  drawText('ENTER NAME:', 30, 34);
+
+  // Draw name with cursor
+  const nameX = NATIVE_W / 2 - (NAME_MAX_LEN * 4) / 2;
+  const nameY = 46;
+
+  // Draw entered characters
+  for (let i = 0; i < nameEntryName.length; i++) {
+    drawText(nameEntryName[i], nameX + i * 5, nameY);
+  }
+
+  // Blinking cursor
+  nameEntryBlink++;
+  if (nameEntryName.length < NAME_MAX_LEN && Math.floor(nameEntryBlink / 15) % 2 === 0) {
+    fillRect(nameX + nameEntryName.length * 5, nameY + 5, 3, 1);
+  }
+
+  // Character selector
+  const selY = 62;
+  const charsPerRow = 13;
+  for (let i = 0; i < NAME_CHARS.length; i++) {
+    const row = Math.floor(i / charsPerRow);
+    const col = i % charsPerRow;
+    const cx = 10 + col * 11;
+    const cy = selY + row * 10;
+    const isSelected = (i === nameEntryCursor);
+
+    if (isSelected) {
+      // Draw selection box
+      fillRect(cx - 1, cy - 1, 5, 7);
+      drawText(NAME_CHARS[i], cx, cy, false); // inverted
+    } else {
+      drawText(NAME_CHARS[i], cx, cy);
+    }
+  }
+
+  // Instructions
+  drawText('ARROWS:SEL', 30, 102);
+  drawText('ENTER:PICK', 30, 110);
+  drawText('BACK:DEL', 38, 118);
+  drawText('ESC:DONE', 38, 126);
+}
+
+function drawLeaderboard() {
+  clearScreen();
+
+  drawCenteredBox('LEADERBOARD', 4, 2);
+
+  // Header line
+  fillRect(4, 13, NATIVE_W - 8, 1);
+
+  drawText('NO', 6, 16);
+  drawText('NAME', 22, 16);
+  drawText('LV', NATIVE_W - 20, 16);
+
+  fillRect(4, 23, NATIVE_W - 8, 1);
+
+  for (let i = 0; i < leaderboard.length && i < MAX_LEADERBOARD; i++) {
+    const entry = leaderboard[i];
+    const y = 26 + i * 10;
+
+    // Rank
+    drawText(String(i + 1) + '.', 6, y);
+
+    // Name
+    drawText(entry.name, 22, y);
+
+    // Level
+    drawText(String(entry.level), NATIVE_W - 20, y);
+  }
+
+  if (leaderboard.length === 0) {
+    drawCenteredBox('NO SCORES YET', 60, 2);
+  }
+
+  // Bottom
+  titleBlink++;
+  if (Math.floor(titleBlink / 30) % 2 === 0) {
+    drawCenteredBox('PRESS ENTER', NATIVE_H - 12, 2);
+  }
+}
+
+function drawPlayingScreen() {
+  clearScreen();
+  drawLadder();
+  drawGoal();
+  drawCannons();
+  drawBullets();
+  drawPlayer();
+  drawHUD();
+}
+
+function render() {
+  switch (state) {
+    case 'title': drawTitle(); break;
+    case 'playing': drawPlayingScreen(); break;
+    case 'dead': drawDeathScreen(); break;
+    case 'levelComplete': drawLevelCompleteScreen(); break;
+    case 'win': drawWinScreen(); break;
+    case 'nameEntry': drawNameEntry(); break;
+    case 'leaderboard': drawLeaderboard(); break;
+  }
+}
+
+// --- MAIN LOOP ---
+function gameLoop() {
+  switch (state) {
+    case 'playing': updatePlaying(); break;
+    case 'dead': updateDead(); break;
+    case 'levelComplete': updateLevelComplete(); break;
+  }
+  render();
+  requestAnimationFrame(gameLoop);
+}
+
+// --- INPUT HANDLING ---
+document.addEventListener('keydown', (e) => {
+  ensureAudio();
+  if (state !== 'nameEntry' && state !== 'leaderboard') {
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault();
+      moveUp = true;
+    }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      e.preventDefault();
+      moveDown = true;
+    }
+  }
+  if (e.code === 'Enter' || e.code === 'Space') {
+    e.preventDefault();
+    if (state === 'title') {
+      level = 1;
+      sfxStart();
+      startLevel();
+    } else if (state === 'win') {
+      // Win always qualifies
+      nameEntryLevel = 100;
+      nameEntryName = '';
+      nameEntryCursor = 0;
+      state = 'nameEntry';
+    } else if (state === 'leaderboard') {
+      state = 'title';
+      titleBlink = 0;
+    } else if (state === 'nameEntry') {
+      // Add selected character
+      if (nameEntryName.length < NAME_MAX_LEN) {
+        nameEntryName += NAME_CHARS[nameEntryCursor];
+        playTone(600, 0.04, 'square', 0.08);
+      }
+    }
+  }
+  if (e.code === 'Escape') {
+    e.preventDefault();
+    if (state === 'nameEntry') {
+      // Submit name
+      addScore(nameEntryName, nameEntryLevel);
+      playTone(880, 0.1, 'square', 0.1);
+      state = 'leaderboard';
+      titleBlink = 0;
+    } else if (state === 'leaderboard') {
+      state = 'title';
+      titleBlink = 0;
+    }
+  }
+  if (e.code === 'Backspace') {
+    e.preventDefault();
+    if (state === 'nameEntry' && nameEntryName.length > 0) {
+      nameEntryName = nameEntryName.slice(0, -1);
+      playTone(200, 0.04, 'square', 0.06);
+    }
+  }
+  // Name entry cursor navigation
+  if (state === 'nameEntry') {
+    const charsPerRow = 13;
+    const totalChars = NAME_CHARS.length;
+    if (e.code === 'ArrowRight') {
+      nameEntryCursor = (nameEntryCursor + 1) % totalChars;
+    }
+    if (e.code === 'ArrowLeft') {
+      nameEntryCursor = (nameEntryCursor - 1 + totalChars) % totalChars;
+    }
+    if (e.code === 'ArrowDown') {
+      nameEntryCursor = Math.min(nameEntryCursor + charsPerRow, totalChars - 1);
+    }
+    if (e.code === 'ArrowUp') {
+      nameEntryCursor = Math.max(nameEntryCursor - charsPerRow, 0);
+    }
+  }
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.code === 'ArrowUp' || e.code === 'KeyW') moveUp = false;
+  if (e.code === 'ArrowDown' || e.code === 'KeyS') moveDown = false;
+  if (e.code === 'KeyL' && state === 'title') {
+    state = 'leaderboard';
+    titleBlink = 0;
+  }
+});
+
+// Touch / Click controls (left half = down, right half = up)
+canvas.addEventListener('mousedown', (e) => {
+  ensureAudio();
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const half = rect.width / 2;
+
+  if (state === 'title' || state === 'win') {
+    level = 1;
+    sfxStart();
+    startLevel();
+    return;
+  }
+  if (state === 'leaderboard' || state === 'nameEntry') {
+    return;
+  }
+
+  if (x >= half) {
+    moveUp = true;
+  } else {
+    moveDown = true;
+  }
+});
+
+canvas.addEventListener('mouseup', () => {
+  moveUp = false;
+  moveDown = false;
+});
+
+canvas.addEventListener('mouseleave', () => {
+  moveUp = false;
+  moveDown = false;
+});
+
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  ensureAudio();
+  const rect = canvas.getBoundingClientRect();
+  const touch = e.touches[0];
+  const x = touch.clientX - rect.left;
+  const half = rect.width / 2;
+
+  if (state === 'title' || state === 'win') {
+    level = 1;
+    sfxStart();
+    startLevel();
+    return;
+  }
+  if (state === 'leaderboard' || state === 'nameEntry') {
+    return;
+  }
+
+  if (x >= half) {
+    moveUp = true;
+  } else {
+    moveDown = true;
+  }
+}, { passive: false });
+
+canvas.addEventListener('touchend', (e) => {
+  e.preventDefault();
+  moveUp = false;
+  moveDown = false;
+}, { passive: false });
+
+// --- START ---
+gameLoop();
+
+// --- SERVICE WORKER REGISTRATION ---
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      console.log('SW registered:', reg.scope);
+    }).catch(err => {
+      console.log('SW registration failed:', err);
+    });
+  });
+}
+</script>
+</body>
+</html>
