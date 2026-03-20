@@ -58,31 +58,96 @@
     font-family: monospace;
     letter-spacing: 1px;
   }
+  #touchControls {
+    display: none;
+  }
+  .touchBtn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 3px solid #9bbc0f;
+    border-radius: 8px;
+    color: #9bbc0f;
+    font-family: monospace;
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    transition: background 0.08s, transform 0.08s;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .touchBtn svg {
+    width: 36px;
+    height: 36px;
+    margin-bottom: 4px;
+  }
+  .touchBtn.active {
+    background: #9bbc0f;
+    color: #0f380f;
+    transform: scale(0.95);
+  }
+  .touchBtn.active svg {
+    fill: #0f380f;
+  }
 
-  /* Mobile: canvas fills entire screen, no border/controls */
+  /* Mobile: proper layout with touch buttons */
   @media (max-width: 700px), (pointer: coarse) {
     body { display: block; }
-    #gameWrapper {
-      border: none;
-      border-radius: 0;
-      box-shadow: none;
+    #mobileContainer {
+      display: flex;
+      flex-direction: column;
       width: 100vw;
       height: 100vh;
       height: 100dvh;
     }
+    #gameWrapper {
+      border: none;
+      border-radius: 0;
+      box-shadow: none;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0f380f;
+      overflow: hidden;
+    }
     canvas {
       width: 100vw !important;
-      height: 100vh !important;
-      height: 100dvh !important;
+      height: auto !important;
+      aspect-ratio: 160 / 144;
+      max-height: 100%;
+    }
+    #touchControls {
+      display: flex;
+      gap: 8px;
+      padding: 8px;
+      padding-bottom: max(8px, env(safe-area-inset-bottom));
+      background: #0f380f;
+      flex-shrink: 0;
+    }
+    .touchBtn {
+      flex: 1;
+      height: 80px;
     }
     #controls { display: none; }
   }
 </style>
 </head>
 <body>
-<div>
+<div id="mobileContainer">
   <div id="gameWrapper">
     <canvas id="game"></canvas>
+  </div>
+  <div id="touchControls">
+    <div id="btnDown" class="touchBtn">
+      <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="12,18 4,8 20,8"/></svg>
+      <span>DOWN</span>
+    </div>
+    <div id="btnUp" class="touchBtn">
+      <svg viewBox="0 0 24 24" fill="currentColor"><polygon points="12,6 4,16 20,16"/></svg>
+      <span>UP</span>
+    </div>
   </div>
   <div id="controls">ARROW UP / RIGHT CLICK = CLIMB &nbsp; | &nbsp; ARROW DOWN / LEFT CLICK = DESCEND</div>
 </div>
@@ -1136,6 +1201,56 @@ canvas.addEventListener('touchend', (e) => {
   moveUp = false;
   moveDown = false;
 }, { passive: false });
+
+// --- TOUCH BUTTON CONTROLS ---
+const btnUp = document.getElementById('btnUp');
+const btnDown = document.getElementById('btnDown');
+
+function handleBtnTouchStart(btn, isUp) {
+  return function(e) {
+    e.preventDefault();
+    ensureAudio();
+    btn.classList.add('active');
+
+    if (state === 'title' || state === 'win') {
+      level = 1;
+      sfxStart();
+      startLevel();
+      return;
+    }
+    if (state === 'leaderboard') {
+      state = 'title';
+      titleBlink = 0;
+      return;
+    }
+
+    if (isUp) moveUp = true;
+    else moveDown = true;
+  };
+}
+
+function handleBtnTouchEnd(btn, isUp) {
+  return function(e) {
+    e.preventDefault();
+    btn.classList.remove('active');
+    if (isUp) moveUp = false;
+    else moveDown = false;
+  };
+}
+
+btnUp.addEventListener('touchstart', handleBtnTouchStart(btnUp, true), { passive: false });
+btnUp.addEventListener('touchend', handleBtnTouchEnd(btnUp, true), { passive: false });
+btnUp.addEventListener('touchcancel', handleBtnTouchEnd(btnUp, true), { passive: false });
+btnUp.addEventListener('mousedown', handleBtnTouchStart(btnUp, true));
+btnUp.addEventListener('mouseup', handleBtnTouchEnd(btnUp, true));
+btnUp.addEventListener('mouseleave', handleBtnTouchEnd(btnUp, true));
+
+btnDown.addEventListener('touchstart', handleBtnTouchStart(btnDown, false), { passive: false });
+btnDown.addEventListener('touchend', handleBtnTouchEnd(btnDown, false), { passive: false });
+btnDown.addEventListener('touchcancel', handleBtnTouchEnd(btnDown, false), { passive: false });
+btnDown.addEventListener('mousedown', handleBtnTouchStart(btnDown, false));
+btnDown.addEventListener('mouseup', handleBtnTouchEnd(btnDown, false));
+btnDown.addEventListener('mouseleave', handleBtnTouchEnd(btnDown, false));
 
 // --- START ---
 gameLoop();
